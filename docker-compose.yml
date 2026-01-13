@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ufr_set_postgres
+    restart: always
+    environment:
+      - POSTGRES_DB=ufr_set_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=votre_mot_de_passe
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Optionnel : scripts SQL pour initialiser les filières/maquettes au démarrage
+      # - ./init-db:/docker-entrypoint-initdb.d 
+
+volumes:
+  postgres_data:
