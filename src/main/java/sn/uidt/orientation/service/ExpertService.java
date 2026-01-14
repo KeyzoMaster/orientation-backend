@@ -11,11 +11,10 @@ import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional; // IMPORTANT
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import sn.uidt.orientation.constants.StatutResultat;
 import sn.uidt.orientation.model.security.Utilisateur;
 import sn.uidt.orientation.model.student.*;
 import sn.uidt.orientation.repository.CandidatureMasterRepository;
@@ -34,7 +33,6 @@ public class ExpertService {
     @Value("${prolog.rules-file-path}")
     private String rulesPath;
 
-    // AJOUT DE @Transactional POUR ACTIVER LE LAZY LOADING DES NOTES
     @Transactional
     public String analyserParcours(Long etudiantId) {
         List<InscriptionAnnuelle> parcoursActuel = inscriptionRepository.findByEtudiantIdOrderByAnneeAcademiqueAsc(etudiantId);
@@ -43,9 +41,9 @@ public class ExpertService {
             return """
                 {
                     "specialiteL3": "Données insuffisantes",
-                    "probabiliteMasterPublic": 0.0,
-                    "probabiliteMasterPrive": 0.0,
-                    "matieresACorriger": [],
+                    "messageL3": "Aucun parcours trouvé.",
+                    "statsMaster": [],
+                    "messageMaster": "",
                     "conseilTrajectoire": "Aucune donnée académique trouvée."
                 }
                 """;
@@ -72,8 +70,8 @@ public class ExpertService {
         StringBuilder sb = new StringBuilder();
         sb.append(":- discontiguous est_ancien/1.\n");
         sb.append(":- discontiguous annee_academique/7.\n");
-        sb.append(":- discontiguous statut_ue/5.\n");
         sb.append(":- discontiguous note_ec/5.\n");
+        sb.append(":- discontiguous moyenne_semestre/4.\n"); // Nouveau fait
         sb.append(":- discontiguous candidature_historique/5.\n");
         sb.append(":- style_check(-singleton).\n");
         
@@ -116,14 +114,21 @@ public class ExpertService {
                     decision
             ));
 
-            // Navigation profonde dans l'arbre d'objets (nécessite @Transactional si Lazy Loading)
             if (insc.getInscriptionsSemestrielles() != null) {
                 for (InscriptionSemestrielle is : insc.getInscriptionsSemestrielles()) {
+                    
+                    // --- NOUVEAU : Export de la moyenne semestrielle pour l'analyse relative ---
+                    String nomSemestre = (is.getSemestre() != null) ? is.getSemestre().name().toLowerCase() : "inconnu";
+                    Double moySem = (is.getMoyenneSemestre() != null) ? is.getMoyenneSemestre() : 0.0;
+                    
+                    sb.append(String.format(Locale.US, "moyenne_semestre(%d, %d, '%s', %.2f).\n",
+                            userId, insc.getAnneeAcademique(), nomSemestre, moySem));
+                    // --------------------------------------------------------------------------
+
                     if (is.getResultatsUE() != null) {
                         for (ResultatUE resUE : is.getResultatsUE()) {
                             String codeUE = resUE.getUe().getCode().toLowerCase().replace("'", "");
                             
-                            // Génération des notes
                             if (resUE.getNotesEC() != null) {
                                 for (NoteEC note : resUE.getNotesEC()) {
                                     sb.append(String.format(Locale.US, "note_ec(%d, '%s', %.2f, '%s', %d).\n",
@@ -166,6 +171,7 @@ public class ExpertService {
             
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String output = reader.lines().collect(Collectors.joining("\n"));
+                // Extraction robuste du JSON
                 int jsonStart = output.indexOf("{");
                 int jsonEnd = output.lastIndexOf("}");
                 
@@ -173,6 +179,7 @@ public class ExpertService {
                     return output.substring(jsonStart, jsonEnd + 1);
                 } else {
                     log.error("Echec Prolog, sortie : " + output);
+                    // Retourner une erreur formatée en JSON pour ne pas casser le front
                     return "{\"error\": \"Erreur Prolog : " + output.replace("\"", "'").replace("\n", " ") + "\"}";
                 }
             }
