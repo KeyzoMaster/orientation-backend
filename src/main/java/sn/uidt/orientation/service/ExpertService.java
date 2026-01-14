@@ -11,26 +11,31 @@ import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional; // IMPORTANT
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j; // Ajout Logger
+import lombok.extern.slf4j.Slf4j;
 import sn.uidt.orientation.constants.StatutResultat;
 import sn.uidt.orientation.model.security.Utilisateur;
 import sn.uidt.orientation.model.student.*;
+import sn.uidt.orientation.repository.CandidatureMasterRepository;
 import sn.uidt.orientation.repository.InscriptionAnnuelleRepository;
 import sn.uidt.orientation.repository.UtilisateurRepository;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j // Ajout Logger
+@Slf4j
 public class ExpertService {
 
     private final InscriptionAnnuelleRepository inscriptionRepository;
     private final UtilisateurRepository utilisateurRepository;
+    private final CandidatureMasterRepository candidatureRepository;
     
     @Value("${prolog.rules-file-path}")
     private String rulesPath;
 
+    // AJOUT DE @Transactional POUR ACTIVER LE LAZY LOADING DES NOTES
+    @Transactional
     public String analyserParcours(Long etudiantId) {
         List<InscriptionAnnuelle> parcoursActuel = inscriptionRepository.findByEtudiantIdOrderByAnneeAcademiqueAsc(etudiantId);
         
@@ -52,7 +57,6 @@ public class ExpertService {
 
         String factsComplets = faitsAnciens + "\n" + faitsEtudiant;
         
-        // DEBUG: Afficher les faits générés pour vérifier
         log.debug("--- FAITS PROLOG GENERES ---\n{}", factsComplets);
         
         return executerProlog(factsComplets, etudiantId);
@@ -66,16 +70,24 @@ public class ExpertService {
 
     private String genererFaitsAnciens(List<Utilisateur> anciens) {
         StringBuilder sb = new StringBuilder();
-        // Directives ajoutées une seule fois ici de préférence
         sb.append(":- discontiguous est_ancien/1.\n");
         sb.append(":- discontiguous annee_academique/7.\n");
         sb.append(":- discontiguous statut_ue/5.\n");
         sb.append(":- discontiguous note_ec/5.\n");
+        sb.append(":- discontiguous candidature_historique/5.\n");
         sb.append(":- style_check(-singleton).\n");
         
         for (Utilisateur ancien : anciens) {
             List<InscriptionAnnuelle> parcoursAncien = inscriptionRepository.findByEtudiantIdOrderByAnneeAcademiqueAsc(ancien.getId());
             sb.append(genererFaitsProlog(ancien.getId(), parcoursAncien, true));
+
+            List<CandidatureMaster> candidatures = candidatureRepository.findByEtudiantId(ancien.getId());
+            for (CandidatureMaster cm : candidatures) {
+                String verdict = (cm.getVerdict() != null) ? cm.getVerdict().toLowerCase() : "en_attente";
+                sb.append(String.format("candidature_historique(%d, %d, '%s', '%s', '%s').\n",
+                    ancien.getId(), 0, cm.getSpecialite().getCode().toLowerCase(), 
+                    cm.getTypeFormation(), verdict));
+            }
         }
         return sb.toString();
     }
@@ -83,7 +95,6 @@ public class ExpertService {
     private String genererFaitsProlog(Long userId, List<InscriptionAnnuelle> parcours, boolean estAncien) {
         StringBuilder sb = new StringBuilder();
         
-        // Pour l'étudiant actuel, on ajoute aussi la directive est_ancien(false) ou juste rien
         if (estAncien) {
             sb.append(String.format("est_ancien(%d).\n", userId));
         }
@@ -92,8 +103,6 @@ public class ExpertService {
             String filiereCode = (insc.getSpecialite() != null && insc.getSpecialite().getFiliere() != null) 
                                ? insc.getSpecialite().getFiliere().getCode() : "unknown";
             String specCode = (insc.getSpecialite() != null) ? insc.getSpecialite().getCode() : "unknown";
-            
-            // Gestion safe des nulls pour éviter "null" dans Prolog
             String cycle = (insc.getCycle() != null) ? insc.getCycle().toLowerCase() : "licence";
             String decision = (insc.getDecisionConseil() != null) ? insc.getDecisionConseil().toLowerCase().replace(" ", "_") : "unknown";
 
@@ -107,22 +116,14 @@ public class ExpertService {
                     decision
             ));
 
+            // Navigation profonde dans l'arbre d'objets (nécessite @Transactional si Lazy Loading)
             if (insc.getInscriptionsSemestrielles() != null) {
                 for (InscriptionSemestrielle is : insc.getInscriptionsSemestrielles()) {
                     if (is.getResultatsUE() != null) {
                         for (ResultatUE resUE : is.getResultatsUE()) {
-                            boolean validee = (resUE.getStatut() == StatutResultat.VALIDE 
-                                            || resUE.getStatut() == StatutResultat.COMPENSE 
-                                            || resUE.getStatut() == StatutResultat.ACQUIS_ANTERIEUR);
-                            boolean premiereFois = !resUE.isReportDeNote();
-
-                            // Attention aux single quotes dans les codes UE (rare mais possible)
                             String codeUE = resUE.getUe().getCode().toLowerCase().replace("'", "");
-
-                            sb.append(String.format(Locale.US, "statut_ue(%d, '%s', %d, %b, %b).\n",
-                                    userId, codeUE, insc.getAnneeAcademique(), 
-                                    premiereFois, validee));
-
+                            
+                            // Génération des notes
                             if (resUE.getNotesEC() != null) {
                                 for (NoteEC note : resUE.getNotesEC()) {
                                     sb.append(String.format(Locale.US, "note_ec(%d, '%s', %.2f, '%s', %d).\n",
@@ -147,10 +148,9 @@ public class ExpertService {
             tempFile = Files.createTempFile("facts_" + etudiantId, ".pl");
             Files.writeString(tempFile, facts);
 
-            // Vérification existence fichier règles
             if (rulesPath == null || !Files.exists(Path.of(rulesPath))) {
                 log.error("Fichier de règles introuvable : " + rulesPath);
-                return "{\"error\": \"Configuration Prolog invalide (Règles introuvables)\"}";
+                return "{\"error\": \"Configuration Prolog invalide\"}";
             }
 
             ProcessBuilder pb = new ProcessBuilder(
@@ -162,22 +162,16 @@ public class ExpertService {
             );
             
             pb.redirectErrorStream(true);
-
             Process process = pb.start();
             
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                // MODIFICATION : On capture TOUT pour voir les erreurs
                 String output = reader.lines().collect(Collectors.joining("\n"));
-
-                log.info("Sortie Prolog brute : \n" + output);
-
                 int jsonStart = output.indexOf("{");
                 int jsonEnd = output.lastIndexOf("}");
                 
                 if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
                     return output.substring(jsonStart, jsonEnd + 1);
                 } else {
-                    // Ici on retourne l'erreur brute pour que vous la voyiez dans le Postman/Console
                     log.error("Echec Prolog, sortie : " + output);
                     return "{\"error\": \"Erreur Prolog : " + output.replace("\"", "'").replace("\n", " ") + "\"}";
                 }

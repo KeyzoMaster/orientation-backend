@@ -52,7 +52,12 @@ public class DataSeederService {
 
     @Transactional
     public void seederAnciensEtudiants(int nombre) {
-        log.info("Lancement du seeding LMD (Semestriel) pour {} anciens...", nombre);
+        // ID unique pour ce lot (Timestamp actuel)
+        long batchId = System.currentTimeMillis();
+
+        log.info("==================================================================");
+        log.info("START SEEDING: Génération de {} nouveaux anciens (Batch {})", nombre, batchId);
+        log.info("==================================================================");
 
         Specialite l1Tc = specialiteRepository.findByCode("L_INFO").orElseThrow(); 
         Specialite l3Gl = specialiteRepository.findByCode("L3_GL").orElseThrow();
@@ -61,38 +66,67 @@ public class DataSeederService {
         Specialite m1Rt = specialiteRepository.findByCode("M_RT").orElse(null);
         Filiere filiereInfo = filiereRepository.findByCode("INFO").orElseThrow();
 
+        int reussites = 0;
+        long startTime = System.currentTimeMillis();
+
         for (int i = 1; i <= nombre; i++) {
-            genererParcoursAncien(i, filiereInfo, l1Tc, l3Gl, l3Rt, m1Gl, m1Rt);
+            try {
+                // On passe le batchId pour garantir l'unicité
+                boolean succes = genererParcoursAncien(i, batchId, filiereInfo, l1Tc, l3Gl, l3Rt, m1Gl, m1Rt);
+                if (succes) reussites++;
+                
+                if (i % 50 == 0) {
+                    log.info(">>> Progression: {}/{} étudiants traités...", i, nombre);
+                }
+            } catch (Exception e) {
+                log.error("Erreur seeding ancien #{}: {}", i, e.getMessage());
+            }
         }
+        
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("==================================================================");
+        log.info("SEEDING TERMINÉ en {} ms. {} parcours complets générés.", duration, reussites);
+        log.info("==================================================================");
     }
 
-    private void genererParcoursAncien(int index, Filiere filiere, Specialite l1, Specialite l3Gl, Specialite l3Rt,
+    private boolean genererParcoursAncien(int index, long batchId, Filiere filiere, Specialite l1, Specialite l3Gl, Specialite l3Rt,
                                        Specialite mGl, Specialite mRt) {
-        String email = "ancien_" + index + "@archive.univ-thies.sn";
-        if (utilisateurRepository.findByEmail(email).isPresent()) return;
+        
+        // CORRECTION : Concaténation Compteur + Timestamp (BatchId)
+        String email = "ancien_" + index + "_" + batchId + "@archive.univ-thies.sn";
+        
+        // Double sécurité (normalement inutile avec le timestamp)
+        if (utilisateurRepository.findByEmail(email).isPresent()) {
+            log.debug("Skipping: {} existe déjà.", email);
+            return false;
+        }
 
         ProfilEtudiant profil = choisirProfilAleatoire();
         int anneeCourante = 2017 + random.nextInt(3);
 
         Utilisateur etudiant = new Utilisateur();
-        etudiant.setCodeAnonyme(String.format("ANC-%d-%04d", anneeCourante, index));
+        // Le Code Anonyme inclut aussi une partie du timestamp pour éviter les doublons en base
+        // Format : ANC-ANNEE-BATCH_SUFFIX-INDEX (ex: ANC-2018-999-1)
+        etudiant.setCodeAnonyme(String.format("ANC-%d-%d-%04d", anneeCourante, (batchId % 1000), index));
         etudiant.setEmail(email);
         etudiant.setPassword(passwordEncoder.encode("pass"));
         etudiant.setRole(Role.ETUDIANT);
         etudiant.setEstAncien(true);
         utilisateurRepository.save(etudiant);
 
+        log.trace("Génération parcours pour {} (Profil: {})", email, profil);
+
         // --- L1 ---
-        if (!validerCycle(etudiant, l1, profil, anneeCourante, 3)) return; 
+        if (!validerCycle(etudiant, l1, profil, anneeCourante, 3)) return false; 
         anneeCourante = getLastAnnee(etudiant) + 1;
 
         // --- L2 ---
-        if (!validerCycle(etudiant, l1, profil, anneeCourante, 3)) return;
+        if (!validerCycle(etudiant, l1, profil, anneeCourante, 3)) return false;
         anneeCourante = getLastAnnee(etudiant) + 1;
 
         // --- L3 ---
         Specialite speL3 = random.nextBoolean() ? l3Gl : l3Rt;
-        if (!validerCycle(etudiant, speL3, profil, anneeCourante, 2)) return;
+        if (!validerCycle(etudiant, speL3, profil, anneeCourante, 2)) return false;
         anneeCourante = getLastAnnee(etudiant) + 1;
 
         // --- MASTER ---
@@ -101,14 +135,17 @@ public class DataSeederService {
             double moyL3 = getLastMoyenne(etudiant);
             simulerCandidatureEtMaster(etudiant, anneeCourante, masterVise, profil, moyL3);
         }
+        return true;
     }
 
     @Transactional
     public void seederParcoursEtudiant(String email) {
+        log.info("--- Simulation Parcours Actuel: {} ---", email);
         Utilisateur etudiant = utilisateurRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Étudiant introuvable"));
 
         if (!inscriptionRepository.findByEtudiantIdOrderByAnneeAcademiqueAsc(etudiant.getId()).isEmpty()) {
+            log.warn("Parcours déjà existant pour {}, abandon.", email);
             return;
         }
 
@@ -121,15 +158,21 @@ public class DataSeederService {
 
         // Simulation L1
         if (!simulerAnnee(etudiant, anneeCourante, l1Tc, profil)) {
+            log.info("L1: Redoublement en 2021");
             anneeCourante++;
             simulerAnnee(etudiant, anneeCourante, l1Tc, ProfilEtudiant.MOYEN); 
+        } else {
+            log.info("L1: Validée du premier coup");
         }
         anneeCourante++;
 
         // Simulation L2
         if (!simulerAnnee(etudiant, anneeCourante, l1Tc, profil)) {
+             log.info("L2: Redoublement en {}", anneeCourante);
              anneeCourante++;
              simulerAnnee(etudiant, anneeCourante, l1Tc, ProfilEtudiant.MOYEN);
+        } else {
+            log.info("L2: Validée");
         }
         anneeCourante++;
 
@@ -137,7 +180,7 @@ public class DataSeederService {
         Specialite speL3 = random.nextBoolean() ? l3Gl : l3Rt;
         adminService.inscrireEtudiant(etudiant.getId(), anneeCourante, speL3);
 
-        log.info("Parcours LMD généré pour {}", email);
+        log.info(">>> Parcours généré avec succès. Inscrit en {} pour l'année {}.", speL3.getLibelle(), anneeCourante);
     }
 
     private boolean validerCycle(Utilisateur etudiant, Specialite spec, ProfilEtudiant profil, int anneeDepart, int maxEssais) {
@@ -150,7 +193,7 @@ public class DataSeederService {
             valide = simulerAnnee(etudiant, anneeActuelle, spec, profilCourant);
             anneeActuelle++;
             essais++;
-            if (!valide && profilCourant == ProfilEtudiant.DIFFICILE) profilCourant = ProfilEtudiant.MOYEN;
+            // if (!valide && profilCourant == ProfilEtudiant.DIFFICILE) profilCourant = ProfilEtudiant.MOYEN;
         }
         return valide;
     }
@@ -159,7 +202,6 @@ public class DataSeederService {
      * Simule une année avec calcul par SEMESTRE
      */
     private boolean simulerAnnee(Utilisateur etudiant, int annee, Specialite spec, ProfilEtudiant profil) {
-        // L'inscription crée automatiquement les InscriptionSemestrielle
         InscriptionAnnuelle inscription = adminService.inscrireEtudiant(etudiant.getId(), annee, spec);
         recupererDettesAnterieures(etudiant, inscription);
 
@@ -168,12 +210,10 @@ public class DataSeederService {
         int nbSemestres = inscription.getInscriptionsSemestrielles().size();
 
         for (InscriptionSemestrielle is : inscription.getInscriptionsSemestrielles()) {
-            // --- Traitement du Semestre ---
             double sommeMoyenneUE = 0;
             int countUE = 0;
             int creditsSemestre = 0;
             
-            // On copie la liste pour pouvoir ajouter des éléments si besoin (bien que les dettes soient déjà là)
             List<ResultatUE> resultatsATraiter = new ArrayList<>(is.getResultatsUE());
 
             for (ResultatUE res : resultatsATraiter) {
@@ -189,30 +229,30 @@ public class DataSeederService {
             double moySemestre = (countUE > 0) ? sommeMoyenneUE / countUE : 0;
             is.setMoyenneSemestre(moySemestre);
             is.setCreditsObtenus(creditsSemestre);
-            is.setEstValide(moySemestre >= 10); // Validation simple du semestre
+            is.setEstValide(moySemestre >= 10);
             
             sommeMoyennesSemestres += moySemestre;
             totalCreditsAnnee += creditsSemestre;
         }
 
-        // --- Délibération Annuelle ---
-        // Moyenne Annuelle = (Moyenne S1 + Moyenne S2) / 2
         double moyAnnuelle = (nbSemestres > 0) ? sommeMoyennesSemestres / nbSemestres : 0;
         inscription.setMoyenneAnnuelle(moyAnnuelle);
 
+        boolean passage = false;
         if (moyAnnuelle >= 10.0) {
             inscription.setDecisionConseil("ADMIS");
-            inscriptionRepository.save(inscription);
-            return true;
+            passage = true;
         } else if (totalCreditsAnnee >= 42) { // AJAC
             inscription.setDecisionConseil("PASSAGE_CONDITIONNEL");
-            inscriptionRepository.save(inscription);
-            return true; 
+            passage = true; 
         } else {
             inscription.setDecisionConseil("REDOUBLANT");
-            inscriptionRepository.save(inscription);
-            return false;
+            passage = false;
         }
+        
+        inscriptionRepository.save(inscription);
+        log.trace("Année {}: Moyenne={}, Décision={}", annee, String.format("%.2f", moyAnnuelle), inscription.getDecisionConseil());
+        return passage;
     }
 
     private void recupererDettesAnterieures(Utilisateur etudiant, InscriptionAnnuelle inscriptionActuelle) {
@@ -221,21 +261,10 @@ public class DataSeederService {
         for (InscriptionAnnuelle ancienneInsc : historique) {
             if (ancienneInsc.getId().equals(inscriptionActuelle.getId())) continue;
 
-            // On parcourt les semestres de l'année précédente
             for (InscriptionSemestrielle ancienSem : ancienneInsc.getInscriptionsSemestrielles()) {
                 for (ResultatUE ancienRes : ancienSem.getResultatsUE()) {
-                    // Si l'UE est échouée
                     if (ancienRes.getMoyenne() != null && ancienRes.getMoyenne() < 10.0) {
                         
-                        // Trouver le semestre correspondant dans la nouvelle inscription (S1->S3, S2->S4 ?)
-                        // Pour simplifier : on cherche si le semestre actuel contient la maquette de l'UE en question ?
-                        // NON, en LMD, une dette de S1 se rattache au S3 (Semestres impairs).
-                        
-                        // Simplification : On cherche le semestre de l'inscription actuelle qui a la même PARITÉ ou même CODE
-                        // Ici, on va juste chercher le semestre qui a le bon code si possible, sinon on attache au premier trouvé
-                        // ATTENTION : il faut que l'UE soit attachée à un semestre.
-                        
-                        // Approche robuste : On attache la dette au semestre qui a la même parité (Impair/Pair)
                         Semestre semestreDette = ancienRes.getUe().getMaquetteSemestre().getSemestre();
                         boolean estImpair = semestreDette.name().endsWith("1") || semestreDette.name().endsWith("3") || semestreDette.name().endsWith("5");
                         
@@ -245,9 +274,8 @@ public class DataSeederService {
                                 return currentImpair == estImpair;
                             })
                             .findFirst()
-                            .orElse(inscriptionActuelle.getInscriptionsSemestrielles().get(0)); // Fallback
+                            .orElse(inscriptionActuelle.getInscriptionsSemestrielles().get(0));
 
-                        // Vérifier doublon
                         boolean dejaPresente = targetSemestre.getResultatsUE().stream()
                             .anyMatch(r -> r.getUe().getCode().equals(ancienRes.getUe().getCode()));
 
@@ -275,7 +303,6 @@ public class DataSeederService {
         List<EC> ecs = res.getUe().getEcs();
         if (ecs == null || ecs.isEmpty()) return 10.0;
 
-        // PASSE 1 : Session NORMALE
         Map<EC, Double> notesNormales = new HashMap<>();
         double sommeNormale = 0;
 
@@ -283,15 +310,12 @@ public class DataSeederService {
             double noteVal = genererNoteGaussienne(profil);
             notesNormales.put(ec, noteVal);
             sommeNormale += noteVal;
-            
-            // Appel adminService.saisirNote qui gère la navigation vers le bon semestre
             adminService.saisirNote(inscriptionAnnuelleId, res.getUe().getCode(), ec.getLibelle(), noteVal, TypeSession.NORMALE);
         }
 
         double moyenneNormaleUE = sommeNormale / ecs.size();
         double sommeFinale = 0;
 
-        // PASSE 2 : RATTRAPAGE
         for (EC ec : ecs) {
             double noteNormale = notesNormales.get(ec);
             double noteFinale = noteNormale;
@@ -301,7 +325,6 @@ public class DataSeederService {
             if (rattrapageRequis) {
                 double boost = (profil == ProfilEtudiant.DIFFICILE) ? 1.0 : 3.5;
                 double noteRattrapage = Math.min(20, noteNormale + random.nextDouble() * boost);
-                
                 adminService.saisirNote(inscriptionAnnuelleId, res.getUe().getCode(), ec.getLibelle(), noteRattrapage, TypeSession.RATTRAPAGE);
                 noteFinale = Math.max(noteNormale, noteRattrapage);
             }
@@ -341,12 +364,13 @@ public class DataSeederService {
         cm.setEtudiant(etudiant); cm.setSpecialite(masterVise); 
         cm.setTypeFormation(typeFormation); cm.setVerdict(admis ? "ACCEPTE" : "REJETE");
         candidatureMasterRepository.save(cm);
+        
+        log.trace("Candidature Master {} ({}): {}", masterVise.getCode(), typeFormation, cm.getVerdict());
 
         if (admis) simulerCursusMaster(etudiant, annee, masterVise, profil);
     }
 
     private void simulerCursusMaster(Utilisateur etudiant, int annee, Specialite master, ProfilEtudiant profil) {
-        // M1
         boolean m1 = simulerAnnee(etudiant, annee, master, profil);
         if (!m1) {
             annee++;
@@ -354,7 +378,6 @@ public class DataSeederService {
         }
         if (!m1) return;
 
-        // M2
         annee++;
         boolean m2 = simulerAnnee(etudiant, annee, master, profil);
         if (!m2) {
@@ -363,7 +386,6 @@ public class DataSeederService {
         }
     }
 
-    // --- HELPERS ---
     private double genererNoteGaussienne(ProfilEtudiant profil) {
         double val = random.nextGaussian() * profil.ecartType + profil.moyenneCible;
         val += (random.nextDouble() - 0.5); 
