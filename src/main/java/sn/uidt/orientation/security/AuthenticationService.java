@@ -6,7 +6,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
-import sn.uidt.orientation.model.security.Role;
+import sn.uidt.orientation.constants.Role;
 import sn.uidt.orientation.model.security.Utilisateur;
 import sn.uidt.orientation.repository.UtilisateurRepository;
 

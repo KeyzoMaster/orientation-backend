@@ -1,27 +1,37 @@
 package sn.uidt.orientation.model.student;
 
+import jakarta.persistence.*;
+import lombok.*;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.ManyToOne;
-import lombok.Data;
+import sn.uidt.orientation.constants.TypeSession;
 import sn.uidt.orientation.model.maquette.EC;
 
 @Entity
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString(exclude = "resultatUE")
+@EqualsAndHashCode(exclude = "resultatUE")
+@Table(name = "note_ec")
 public class NoteEC {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
     private double note;
-    private String session; // NORMALE, RATTRAPAGE
+    
+    @Enumerated(EnumType.STRING)
+    private TypeSession session; 
+
+    private boolean isAbsenceJustifiee;
 
     @ManyToOne
+    @JoinColumn(name = "ec_id") // Match SQL: ec_id
     private EC ec;
 
     @ManyToOne
+    @JoinColumn(name = "resultat_ue_id") // Match SQL: resultat_ue_id
     @JsonBackReference
     private ResultatUE resultatUE;
 }

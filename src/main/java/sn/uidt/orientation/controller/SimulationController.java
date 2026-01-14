@@ -19,24 +19,27 @@ import sn.uidt.orientation.service.ExpertService;
 public class SimulationController {
 
     private final ExpertService expertService;
-    private final ObjectMapper objectMapper; // Pour parser le JSON venant de Prolog
+    private final ObjectMapper objectMapper;
 
     @PostMapping("/lancer")
-    public ResponseEntity<RecommandationDto> demanderSimulation(
+    public ResponseEntity<?> demanderSimulation(
             @AuthenticationPrincipal UserDetails currentUser) {
         
-        // 1. Récupérer l'ID de l'étudiant via son email (username du JWT)
-        Long etudiantId = expertService.getEtudiantIdByEmail(currentUser.getUsername());
-
-        // 2. Appeler le service Prolog qui renvoie une String JSON
-        String jsonResult = expertService.analyserParcours(etudiantId);
-
         try {
-            // 3. Mapper le résultat brut de Prolog vers le DTO Java
+            Long etudiantId = expertService.getEtudiantIdByEmail(currentUser.getUsername());
+            String jsonResult = expertService.analyserParcours(etudiantId);
+            
+            // Si le résultat est un message d'erreur JSON simple
+            if (jsonResult.contains("\"error\"") || jsonResult.contains("\"message\"")) {
+                 return ResponseEntity.badRequest().body(jsonResult);
+            }
+
             RecommandationDto recommendation = objectMapper.readValue(jsonResult, RecommandationDto.class);
             return ResponseEntity.ok(recommendation);
+            
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
+            return ResponseEntity.internalServerError()
+                .body("Erreur lors de la simulation : " + e.getMessage());
         }
     }
 }

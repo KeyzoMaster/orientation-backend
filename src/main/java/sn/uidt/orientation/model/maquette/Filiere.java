@@ -1,21 +1,26 @@
 package sn.uidt.orientation.model.maquette;
 
 import jakarta.persistence.*;
-import lombok.Data;
-import com.fasterxml.jackson.annotation.JsonIgnore; // Import nécessaire
+import lombok.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.List;
 
 @Entity
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString(exclude = "specialites")
+@EqualsAndHashCode(exclude = "specialites")
+@Table(name = "filiere")
 public class Filiere {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    private String code;
-    private String libelle;
+    private String code;    // INFO
+    private String libelle; // Informatique
 
-    // Ajoutez ceci pour permettre la relation JPA tout en évitant la boucle JSON
     @OneToMany(mappedBy = "filiere")
-    @JsonIgnore 
+    @JsonIgnore
     private List<Specialite> specialites;
 }

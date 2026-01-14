@@ -1,35 +1,45 @@
 package sn.uidt.orientation.model.student;
 
+import jakarta.persistence.*;
+import lombok.*;
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import sn.uidt.orientation.constants.StatutResultat;
+import sn.uidt.orientation.constants.TypeInscriptionUE;
+import sn.uidt.orientation.model.maquette.UE;
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
-
-import jakarta.persistence.CascadeType;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.OneToMany;
-import lombok.Data;
-import sn.uidt.orientation.model.maquette.UE;
-
 @Entity
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "resultat_ue")
 public class ResultatUE {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    private boolean validee;
-    private boolean premiereFois;
+    private long id;
+
+    private Double moyenne; 
+
+    @Enumerated(EnumType.STRING)
+    private StatutResultat statut; 
+
+    @Enumerated(EnumType.STRING)
+    private TypeInscriptionUE typeInscription; 
+
+    private boolean isReportDeNote; 
 
     @ManyToOne
+    @JoinColumn(name = "ue_id")
     private UE ue;
 
+    // CHANGEMENT ICI : Lien vers le semestre
     @ManyToOne
+    @JoinColumn(name = "inscription_semestrielle_id")
     @JsonBackReference
-    private InscriptionAnnuelle inscription;
+    private InscriptionSemestrielle inscriptionSemestrielle;
 
     @OneToMany(mappedBy = "resultatUE", cascade = CascadeType.ALL)
-    @JsonBackReference
+    @JsonManagedReference
     private List<NoteEC> notesEC;
 }

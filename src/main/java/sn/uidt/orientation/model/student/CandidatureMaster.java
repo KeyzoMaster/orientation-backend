@@ -1,25 +1,28 @@
 package sn.uidt.orientation.model.student;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.ManyToOne;
-import lombok.Data;
+import jakarta.persistence.*;
+import lombok.*;
 import sn.uidt.orientation.model.maquette.Specialite;
 import sn.uidt.orientation.model.security.Utilisateur;
 
 @Entity
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "candidature_master")
 public class CandidatureMaster {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    
     private String typeFormation; // PUBLIQUE, PRIVEE
     private String verdict;       // ACCEPTE, REJETE
 
     @ManyToOne
+    @JoinColumn(name = "etudiant_id") // Match SQL: etudiant_id
     private Utilisateur etudiant;
 
     @ManyToOne
+    @JoinColumn(name = "specialite_id") // Match SQL: specialite_id
     private Specialite specialite;
 }

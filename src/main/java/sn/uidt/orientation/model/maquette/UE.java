@@ -1,21 +1,33 @@
 package sn.uidt.orientation.model.maquette;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.*;
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonManagedReference;
-
 @Entity
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString(exclude = {"maquetteSemestre", "ecs"})
+@EqualsAndHashCode(exclude = {"maquetteSemestre", "ecs"})
+@Table(name = "ue")
 public class UE {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    private String code;
-    private String libelle;
-    private int credits;
-    private double coefficient;
-    private String domaine; // Pour Prolog : 'dev', 'reseau', etc.
+    
+    private String code;       // INF351
+    private String libelle;    // Programmation
+    private int credits;       // 8
+    private double coefficient; // 3.0
+    private String domaine;    // dev
+
+    @ManyToOne
+    @JoinColumn(name = "maquette_id") // Force la colonne SQL correcte
+    @JsonBackReference
+    private MaquetteSemestre maquetteSemestre;
 
     @OneToMany(mappedBy = "ue", cascade = CascadeType.ALL)
     @JsonManagedReference

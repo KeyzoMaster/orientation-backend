@@ -2,6 +2,8 @@ package sn.uidt.orientation.model.security;
 
 import jakarta.persistence.*;
 import lombok.*;
+import sn.uidt.orientation.constants.Role;
+
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -10,14 +12,20 @@ import java.util.Collection;
 import java.util.List;
 
 @Entity
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Table(name = "utilisateur")
 public class Utilisateur implements UserDetails {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private static final long serialVersionUID = 1L;
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(unique = true)
+    private String codeAnonyme; // Ex: "ANC-2022-001"
 
     @Column(unique = true, nullable = false)
     private String email;
@@ -26,6 +34,9 @@ public class Utilisateur implements UserDetails {
 
     @Enumerated(EnumType.STRING)
     private Role role;
+    
+    @Builder.Default
+    private boolean estAncien = false; 
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

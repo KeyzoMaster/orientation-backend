@@ -6,12 +6,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import sn.uidt.orientation.model.maquette.Filiere;
-import sn.uidt.orientation.model.maquette.Specialite;
-import sn.uidt.orientation.model.maquette.UE;
-import sn.uidt.orientation.repository.FiliereRepository;
-import sn.uidt.orientation.repository.SpecialiteRepository;
-import sn.uidt.orientation.repository.UERepository;
+import sn.uidt.orientation.model.maquette.*;
+import sn.uidt.orientation.repository.*;
 
 @Service
 @RequiredArgsConstructor
@@ -19,8 +15,11 @@ public class MaquetteService {
 
     private final FiliereRepository filiereRepository;
     private final SpecialiteRepository specialiteRepository;
+    private final MaquetteSemestreRepository maquetteSemestreRepository;
     private final UERepository ueRepository;
+    private final ECRepository ecRepository;
 
+    // --- GESTION FILIERES ---
     public List<Filiere> getAllFilieres() {
         return filiereRepository.findAll();
     }
@@ -30,22 +29,47 @@ public class MaquetteService {
         return filiereRepository.save(filiere);
     }
 
-    public List<Specialite> getSpecialitesByFiliere(Long filiereId) {
-        return specialiteRepository.findByFiliereId(filiereId);
-    }
-    
+    // --- GESTION SPECIALITES ---
     @Transactional
-    public Specialite createSpecialite(Specialite specialite) {
-        // On s'assure que la filière associée existe bien
+    public Specialite createSpecialite(Long filiereId, Specialite specialite) {
+        Filiere filiere = filiereRepository.findById(filiereId)
+            .orElseThrow(() -> new RuntimeException("Filière non trouvée"));
+        specialite.setFiliere(filiere);
         return specialiteRepository.save(specialite);
     }
 
+    /**
+     * Associe un semestre (ex: S5 GL) à une spécialité (ex: GL)
+     */
     @Transactional
-    public UE createUE(UE ue) {
-        // Logique pour s'assurer que les ECs sont liés à l'UE
+    public void addSemestreToSpecialite(Long specialiteId, Long maquetteId) {
+        Specialite spec = specialiteRepository.findById(specialiteId).orElseThrow();
+        MaquetteSemestre maquette = maquetteSemestreRepository.findById(maquetteId).orElseThrow();
+        
+        spec.getMaquettes().add(maquette);
+        specialiteRepository.save(spec);
+    }
+
+    // --- GESTION UEs et ECs ---
+    @Transactional
+    public UE addUEToSemestre(Long maquetteId, UE ue) {
+        MaquetteSemestre ms = maquetteSemestreRepository.findById(maquetteId)
+            .orElseThrow(() -> new RuntimeException("Maquette Semestre introuvable"));
+        
+        ue.setMaquetteSemestre(ms);
+        
+        // Sauvegarde de l'UE et de ses ECs en cascade
         if (ue.getEcs() != null) {
             ue.getEcs().forEach(ec -> ec.setUe(ue));
         }
         return ueRepository.save(ue);
+    }
+
+    @Transactional
+    public EC addECToUE(Long ueId, EC ec) {
+        UE ue = ueRepository.findById(ueId)
+            .orElseThrow(() -> new RuntimeException("UE introuvable"));
+        ec.setUe(ue);
+        return ecRepository.save(ec);
     }
 }

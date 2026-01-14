@@ -1,4 +1,4 @@
-package sn.uidt.orientation.model.security;
+package sn.uidt.orientation.constants;
 
 public enum Role {
     ADMIN,
